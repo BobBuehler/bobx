@@ -1,11 +1,12 @@
 import * as bobx from './index';
 
-const watched = bobx.watched({
+const obj = {
     isFoo: true,
     foo: 1,
     bar: 2,
     baz: 3
-});
+};
+const watched = bobx.watched(obj);
 
 function computer() {
     console.log('computing...');
