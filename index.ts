@@ -1,142 +1,196 @@
-interface Listener {
-    (key: string): void
-}
+import * as events from 'events';
 
-function remove<T>(arr: T[], val: T) {
-    const index = arr.indexOf(val);
-    if (index !== -1) {
-        arr.splice(index, 1);
+const PROP_GET = 'prop-get';
+const PROP_CHANGE = 'prop-change';
+const METHOD_GET = 'method-get';
+const METHOD_CHANGE = 'method-change';
+const METHOD_START = 'method-start';
+const METHOD_END = 'method-end';
+const METHOD_INVALID = 'method-invalid';
+
+class WatchableProp<T> {
+    value: T;
+    emitter: events.EventEmitter;
+    
+    constructor(value: T) {
+        this.value = value;
+        this.emitter = new events.EventEmitter();
     }
-}
-
-class Notifier {
-    globalListeners: Listener[] = [];
-    keyListeners: {[index: string]: Listener[]} = {};
-
-    addGlobalListener(listener: Listener): Function {
-        this.globalListeners.push(listener);
-        return () => remove(this.globalListeners, listener);
+    
+    get = () => {
+        this.emitter.emit(PROP_GET, this);
+        return this.value;
     }
-
-    addKeyListener(key: string, listener: Listener): Function {
-        let listeners = this.keyListeners[key];
-        if (listeners === undefined) {
-            listeners = this.keyListeners[key] = [listener];
-        } else {
-            listeners.push(listener);
-        }
-        return () => remove(listeners, listener);
-    }
-
-    notify(key: string): void {
-        const listeners = this.keyListeners[key];
-        if (listeners !== undefined) {
-            listeners.slice().forEach(listener => listener(key));
-        }
-        this.globalListeners.slice().forEach(listener => listener(key));
-    }
-}
-
-class KeyListenerTracker {
-    notifier: Notifier;
-    removers: {[index: string]: Function} = {};
-
-    constructor(notifier: Notifier) {
-        this.notifier = notifier;
-    }
-
-    add(key: string, listener: Listener): void {
-        if (!this.removers[key]) {
-            this.removers[key] = this.notifier.addKeyListener(key, listener)
+    
+    set = (value: T) => {
+        if (value !== this.value) {
+            this.value = value;
+            this.emitter.emit(PROP_CHANGE, this);
         }
     }
+}
 
-    clear() {
-        for (let key in this.removers) {
-            this.removers[key]();
-        }
-        this.removers = {};
+class CachedMethod<T> {
+    method: () => T;
+    value: T;
+    emitter: events.EventEmitter;
+    
+    needsRun: boolean;
+    isInvalid: boolean;
+    maybeChangedMethods: CachedMethod<any>[];
+    changeListenerUnsubs: Function[];
+    
+    otherEvents: events.EventEmitter;
+    runListenerUnsubs: Function[];
+    runDepth: number;
+    
+    constructor(method: () => T, otherEvents: events.EventEmitter) {
+        this.method = method;
+        this.value = null;
+        this.emitter = new events.EventEmitter();
+        
+        this.needsRun = true;
+        this.maybeChangedMethods = [];
+        this.changeListenerUnsubs = [];
+        
+        this.otherEvents = otherEvents;
     }
-}
-
-let nextObjId = 0;
-const changeNotifier = new Notifier();
-const accessNotifier = new Notifier();
-
-function getObjectId(): number {
-    return nextObjId++;
-}
-
-function calcPropertyKey(objectId: number, propertyName: string): string {
-    return `${objectId}#${propertyName}`;
-}
-export function watched<T extends Object>(obj: T): T {
-    const newObj = {};
-    const objectId = getObjectId();
-    Object.keys(obj).forEach(propertyName => {
-        const propertyKey = calcPropertyKey(objectId, propertyName);
-        let propertyValue: T = obj[propertyName];
-        Object.defineProperty(newObj, propertyName, {
-            set: function(value) {
-                propertyValue = value;
-                changeNotifier.notify(propertyKey);
-            },
-            get: function() {
-                accessNotifier.notify(propertyKey);
-                return propertyValue;
+    
+    getValue() {
+        this.update();
+        this.emitter.emit(METHOD_GET, this);
+        return this.value;
+    }
+    
+    update() {
+        if (this.needsRun) {
+            this.run();
+            this.needsRun = false;
+        } else if (this.isInvalid) {
+            for(const method of this.maybeChangedMethods) {
+                method.update();
+                if (this.needsRun) {
+                    this.run();
+                    break;
+                }
             }
-        });
-    });
-
-    return <T>newObj;
-}
-
-export function computed<T>(func: () => T): () => T {
-    let isDirty = true;
-    const changeListenerTracker = new KeyListenerTracker(changeNotifier)
-    let value: T;
-
-    return function() {
-        if (isDirty){
-            compute();
+            this.maybeChangedMethods = [];
+            this.needsRun = false;
+            this.isInvalid = false;
         }
-        return value;
-    };
-
-    function compute() {
-        isDirty = false;
-        const accessListenerRemover = accessNotifier.addGlobalListener(onAccess);
-        value = func();
-        accessListenerRemover();
     }
-
-    function onAccess(propertyKey: string) {
-        changeListenerTracker.add(propertyKey, onDirty);
+    
+    private run() {
+        const oldValue = this.value;
+        
+        this.preRun();
+        this.value = this.method();
+        this.postRun();
+        
+        if (oldValue !== this.value) {
+            this.emitter.emit(METHOD_CHANGE, this);
+        }
     }
+    
+    private preRun() {
+        this.changeListenerUnsubs.forEach(unsub => unsub());
+        this.changeListenerUnsubs = [];
+        
+        this.maybeChangedMethods = [];
+        this.runDepth = 0;
+        
+        this.emitter.emit(METHOD_START, this);
+        
+        this.runListenerUnsubs = [
+            subscribe(this.otherEvents, PROP_GET, this.propGetListener),
+            subscribe(this.otherEvents, METHOD_GET, this.methodGetListener),
+            subscribe(this.otherEvents, METHOD_START, () => this.runDepth++),
+            subscribe(this.otherEvents, METHOD_END, () => this.runDepth--)
+        ];
+    }
+    
+    private postRun() {
+        this.runListenerUnsubs.forEach(unsub => unsub());
+        
+        this.emitter.emit(METHOD_END, this);
+    }
+    
+    private propGetListener = (prop: WatchableProp<any>) => {
+        if (this.runDepth !== 0) {
+            return;
+        }
 
-    function onDirty() {
-        isDirty = true;
-        changeListenerTracker.clear();
+        this.changeListenerUnsubs.push(
+            subscribe(prop.emitter, PROP_CHANGE, this.changeListener)
+        );
+    }
+    
+    private methodGetListener = (otherMethod: CachedMethod<any>) => {
+        if (this.runDepth !== 0) {
+            return;
+        }
+        
+        this.changeListenerUnsubs.push(
+            subscribe(otherMethod.emitter, METHOD_CHANGE, this.changeListener),
+            subscribe(otherMethod.emitter, METHOD_INVALID, this.invalidListener)
+        );
+    }
+    
+    private changeListener = () => {
+        this.needsRun = true;
+        if (!this.isInvalid) {
+            this.isInvalid = true;
+            this.emitter.emit(METHOD_INVALID, this);
+        }
+    }
+    
+    private invalidListener = (otherMethod: CachedMethod<any>) => {
+        this.maybeChangedMethods.push(otherMethod);
+        if (!this.isInvalid) {
+            this.isInvalid = true;
+            this.emitter.emit(METHOD_INVALID, this);
+        }
     }
 }
 
-export function autorun(func: Function): Function {
-    const changeListenerTracker = new KeyListenerTracker(changeNotifier);
-    run();
-    return () => changeListenerTracker.clear();
-
-    function run() {
-        const accessListenerRemover = accessNotifier.addGlobalListener(onAccess);
-        func();
-        accessListenerRemover();
+class BobXInstance {
+    emitter = new events.EventEmitter();
+    
+    watched<T>(object: T): T {
+        const newObject = {};
+        Object.keys(object).forEach(propertyName => {
+            const prop = new WatchableProp<T>(object[propertyName]);
+            connect(prop.emitter, this.emitter, [PROP_GET, PROP_CHANGE]);
+            Object.defineProperty(newObject, propertyName, {
+                set: prop.set,
+                get: prop.get
+            });
+        });
+    
+        return <T>newObject;
     }
-
-    function onAccess(propertyKey: string) {
-        changeListenerTracker.add(propertyKey, onChange);
+    
+    cached<T>(method: () => T): () => T {
+        const newMethod = new CachedMethod(method, this.emitter);
+        connect(newMethod.emitter, this.emitter, [METHOD_GET, METHOD_CHANGE, METHOD_START, METHOD_END, METHOD_INVALID]);
+        return () => newMethod.getValue();
     }
-
-    function onChange() {
-        changeListenerTracker.clear();
-        run();
+    
+    autorun(func: () => void): () => void {
+        return null;
     }
+}
+
+export default new BobXInstance();
+
+function subscribe(emitter: events.EventEmitter, eventName: string, listener: Function): Function {
+    emitter.on(eventName, listener);
+    return () => emitter.removeListener(eventName, listener);
+}
+
+function connect(source: events.EventEmitter, sink: events.EventEmitter, eventNames: string[]): Function {
+    const unsubs: Function[] = eventNames.map(eventName => {
+        return subscribe(source, eventName, function() { sink.emit.call(sink, eventName, ...Array.prototype.slice.apply(arguments)); });
+    });
+    return () => { unsubs.forEach(unsub => unsub()) };
 }
