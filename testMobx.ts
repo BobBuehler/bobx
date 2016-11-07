@@ -1,29 +1,38 @@
-import * as mobx from 'mobx';
+import * as MobX from 'mobx';
 
-const obj = {
+const watched = MobX.observable({
     isFoo: true,
     foo: 1,
     bar: 2,
     baz: 3
-};
-const watched = mobx.observable(obj);
+});
 
-const computer = {
-    get value() {
-        console.log('computing...');
-        return watched.isFoo ? watched.foo : watched.bar * watched.baz;
-    }
-}
-
-const computed = mobx.observable(computer);
+const foo = MobX.computed(() => {
+    console.log('computing foo');
+    return watched.foo;
+});
+const barBaz = MobX.computed(() => {
+    console.log('computing bar baz');
+    return watched.bar * watched.baz;
+});
+const full = MobX.computed(() => {
+    console.log('computing full');
+    return watched.isFoo ? foo.get() : barBaz.get();
+});
 
 function printer() {
-    console.log(computed.value, watched.isFoo, watched.foo, watched.bar, watched.baz);
+    console.log('printer', full.get(), watched.isFoo, watched.foo, watched.bar, watched.baz);
+    console.log();
 }
-mobx.autorun(printer);
 
+printer();
+printer();
 watched.foo = 2;
+printer();
 watched.bar = 3;
+printer();
 watched.isFoo = false;
-watched.foo = 4;
-watched.bar = 5;
+printer();
+watched.bar = 1;
+watched.baz = 9;
+printer();

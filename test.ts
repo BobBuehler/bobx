@@ -1,12 +1,11 @@
 import BobX from './index';
 
-const obj = {
+const watched = BobX.watched({
     isFoo: true,
     foo: 1,
     bar: 2,
     baz: 3
-};
-const watched = BobX.watched(obj);
+});
 
 const foo = BobX.cached(() => {
     console.log('computing foo');
@@ -25,20 +24,15 @@ function printer() {
     console.log('printer', full(), watched.isFoo, watched.foo, watched.bar, watched.baz);
     console.log();
 }
-BobX.autorun(printer);
 
+printer();
 printer();
 watched.foo = 2;
 printer();
 watched.bar = 3;
 printer();
-watched.bar = 4;
-printer();
-watched.bar = 3;
-printer();
 watched.isFoo = false;
 printer();
-watched.foo = 4;
-printer();
-watched.bar = 5;
+watched.bar = 1;
+watched.baz = 9;
 printer();
