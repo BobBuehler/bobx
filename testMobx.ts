@@ -25,7 +25,11 @@ function printer() {
     console.log();
 }
 
+MobX.autorun(() => full.get());
+
 printer();
+printer();
+watched.foo = 2;
 printer();
 watched.foo = 2;
 printer();
@@ -33,6 +37,12 @@ watched.bar = 3;
 printer();
 watched.isFoo = false;
 printer();
-watched.bar = 1;
-watched.baz = 9;
+MobX.action(() => {
+    watched.bar = 1;
+    watched.baz = 9;
+})();
+printer();
+watched.isFoo = true;
+printer();
+watched.isFoo = false;
 printer();

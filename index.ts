@@ -9,7 +9,7 @@ const METHOD_END = 'method-end';
 const METHOD_INVALID = 'method-invalid';
 
 class WatchableProp<T> {
-    value: T;
+    private value: T;
     emitter: events.EventEmitter;
     
     constructor(value: T) {
@@ -31,18 +31,18 @@ class WatchableProp<T> {
 }
 
 class CachedMethod<T> {
-    method: () => T;
-    value: T;
+    private method: () => T;
+    private value: T;
     emitter: events.EventEmitter;
     
-    needsRun: boolean;
-    isInvalid: boolean;
-    maybeChangedMethods: CachedMethod<any>[];
-    changeListenerUnsubs: Function[];
+    private needsRun: boolean;
+    private isInvalid: boolean;
+    private maybeChangedMethods: CachedMethod<any>[];
+    private changeListenerUnsubs: Function[];
     
-    otherEvents: events.EventEmitter;
-    runListenerUnsubs: Function[];
-    runDepth: number;
+    private otherEvents: events.EventEmitter;
+    private runListenerUnsubs: Function[];
+    private runDepth: number;
     
     constructor(method: () => T, otherEvents: events.EventEmitter) {
         this.method = method;
@@ -56,7 +56,7 @@ class CachedMethod<T> {
         this.otherEvents = otherEvents;
     }
     
-    getValue() {
+    getValue(): T {
         this.update();
         this.emitter.emit(METHOD_GET, this);
         return this.value;
