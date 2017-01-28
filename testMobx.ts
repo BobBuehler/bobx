@@ -46,3 +46,29 @@ watched.isFoo = true;
 printer();
 watched.isFoo = false;
 printer();
+
+//////
+
+class Boo {
+  v: number;
+  
+  constructor() { this.v = 1; }
+  inc() { this.v++; }
+  value() { return this.v; }
+}
+const store = MobX.observable({
+    boo: new Boo(),
+    hoo: { v: 1 }
+});
+const booValue = MobX.computed(() => {
+    return store.boo.value();
+});
+const hooValue = MobX.computed(() => {
+    return store.hoo.v;
+});
+
+MobX.autorun(() => console.log(booValue.get(), hooValue.get()));
+store.boo.inc();
+store.hoo.v++;
+store.boo.inc();
+console.log(store.boo.value(), store.hoo.v);
