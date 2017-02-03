@@ -50,25 +50,23 @@ printer();
 //////
 
 class Boo {
-  v: number;
-  
-  constructor() { this.v = 1; }
-  inc() { this.v++; }
-  value() { return this.v; }
+  v: number = 1;
 }
 const store = MobX.observable({
     boo: new Boo(),
     hoo: { v: 1 }
 });
 const booValue = MobX.computed(() => {
-    return store.boo.value();
+    return store.boo.v;
 });
 const hooValue = MobX.computed(() => {
     return store.hoo.v;
 });
 
-MobX.autorun(() => console.log(booValue.get(), hooValue.get()));
-store.boo.inc();
+function booHoo() { console.log(`${store.boo.v}=${booValue.get()}, ${store.hoo.v}=${hooValue.get()}`); }
+MobX.autorun(booHoo);
+store.boo.v++;
 store.hoo.v++;
-store.boo.inc();
-console.log(store.boo.value(), store.hoo.v);
+store.boo.v++;
+store.hoo.v++;
+booHoo();
